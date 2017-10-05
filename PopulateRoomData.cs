@@ -11,6 +11,7 @@ using Proto = Revit.Elements;
 using DS = Autodesk.DesignScript.Geometry;
 using System.Text;
 using System.Globalization;
+using Revit.GeometryConversion;
 
 namespace DynamoAecom
 {
@@ -216,7 +217,7 @@ namespace DynamoAecom
                 return null;
             }
         }
-#endregion
+        #endregion
 
         #region Views.PopulateRoomInformation 
         /// <summary>
@@ -227,11 +228,13 @@ namespace DynamoAecom
         /// <param name="elements"></param>
         /// <param name="parameter"></param>
         /// <returns></returns>
-        public static string PopulateElementRoomInformation([DefaultArgument("{}")] IList rooms,
+        [MultiReturn(new[] {  "points" })]
+        public static Dictionary<string, object> PopulateElementRoomInformation([DefaultArgument("{}")] IList rooms,
             [DefaultArgument("{}")] IList<IList> points,
             [DefaultArgument("{}")] IList elements,
             [DefaultArgument("{}")] string parameter)
         {
+            List<object> pts = new List<object>();
             int iterations = rooms.Count * elements.Count;
             int iteration = 0;
 
@@ -259,6 +262,8 @@ namespace DynamoAecom
 
                 for (int i = 0; i < elements.Count; i++)
                 {
+                    object pointCarry = null;
+
                     Element el = ((Proto.Element)elements[i]).InternalElement;
                     Parameter param = el.LookupParameter(parameter);
                     if (param == null)
@@ -269,12 +274,18 @@ namespace DynamoAecom
                     {
                         if (form.getAbortFlag())
                         {
-                            return "Aborted by user";
+                            return null;
+                            //return "Aborted by user";
                         }
 
                         Autodesk.Revit.DB.Architecture.Room r = ((Proto.Element)room).InternalElement as Autodesk.Revit.DB.Architecture.Room;
 
-                        AssignRoom(r, el, points[i], param);
+                        object testPoint = AssignRoom(r, el, points[i], param);
+
+                        if(testPoint != null)
+                        {
+                            pointCarry = (testPoint as XYZ).ToPoint();
+                        }
 
                         form.Increment();
                         iteration++;
@@ -283,15 +294,19 @@ namespace DynamoAecom
                     {
                         param.Set("n/a");
                     }
+                    pts.Add(pointCarry);
                 }
 
                 RevitServices.Transactions.TransactionManager.Instance.TransactionTaskDone();
             }
-
-            return String.Format("{0} elements processed successfully.", iterations.ToString());
+            return new Dictionary<string, object>
+                {
+                    { "points", pts }
+                };
+            //return String.Format("{0} elements processed successfully.", iterations.ToString());
         }
 
-        private static void AssignRoom(Autodesk.Revit.DB.Architecture.Room room, Element element, IList points, Parameter parameter)
+        private static object AssignRoom(Autodesk.Revit.DB.Architecture.Room room, Element element, IList points, Parameter parameter)
         {
             foreach (var point in points)
             {
@@ -303,9 +318,10 @@ namespace DynamoAecom
                         name += ", " + parameter.AsString();
                     }
                     parameter.Set(name);
-                    return;
+                    return point;
                 }
             }
+            return null;
         }
 #endregion
     }
