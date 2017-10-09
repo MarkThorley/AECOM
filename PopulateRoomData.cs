@@ -229,7 +229,7 @@ namespace DynamoAecom
         /// <param name="parameter"></param>
         /// <returns></returns>
         [MultiReturn(new[] {  "points" })]
-        public static Dictionary<string, object> PopulateElementRoomInformation([DefaultArgument("{}")] IList rooms,
+        public static Dictionary<string, object> PopulateRoomInformation([DefaultArgument("{}")] IList rooms,
             [DefaultArgument("{}")] IList<IList> points,
             [DefaultArgument("{}")] IList elements,
             [DefaultArgument("{}")] string parameter)
@@ -284,7 +284,7 @@ namespace DynamoAecom
 
                         if(testPoint != null)
                         {
-                            pointCarry = (testPoint as XYZ).ToPoint();
+                            pointCarry = (testPoint as XYZ);
                         }
 
                         form.Increment();
@@ -305,7 +305,25 @@ namespace DynamoAecom
                 };
             //return String.Format("{0} elements processed successfully.", iterations.ToString());
         }
-
+        private static object AssignRoom(Autodesk.Revit.DB.Architecture.Room room, DS.Solid solid, Element element, IList points, Parameter parameter)
+        {
+            foreach (var point in points)
+            {
+                DS.Point p = point as DS.Point;
+                if (p == null) continue;
+                if (solid.DoesIntersect(p))
+                {
+                    string name = room.LookupParameter("Number").AsString() + " - " + room.LookupParameter("Name").AsString();
+                    if (!parameter.AsString().Equals(""))
+                    {
+                        name += ", " + parameter.AsString();
+                    }
+                    parameter.Set(name);
+                    return point;
+                }
+            }
+            return null;
+        }
         private static object AssignRoom(Autodesk.Revit.DB.Architecture.Room room, Element element, IList points, Parameter parameter)
         {
             foreach (var point in points)
@@ -323,7 +341,122 @@ namespace DynamoAecom
             }
             return null;
         }
-#endregion
+        /// <summary>
+        /// Feeds room information to element in a chosen parameter
+        /// </summary>
+        /// <param name="rooms"></param>
+        /// <param name="solids"></param>
+        /// <param name="points"></param>
+        /// <param name="elements"></param>
+        /// <param name="parameter"></param>
+        /// <returns></returns>
+        [MultiReturn(new[] { "points" , "message" })]
+        public static Dictionary<string, object> PopulateRoomInformationBySolids([DefaultArgument("{}")] IList rooms,
+            [DefaultArgument("{}")] IList solids,
+            [DefaultArgument("{}")] IList<IList> points,
+            [DefaultArgument("{}")] IList elements,
+            [DefaultArgument("{}")] string parameter)
+        {
+            List<object> pts = new List<object>();
+            int iterations = rooms.Count * elements.Count;
+            int iteration = 0;
+            int success = 0;
+
+            if (rooms.Count != solids.Count)
+            {
+                TaskDialog.Show("Error", "Room count not equal to solid count.");
+                return null;
+            }
+
+            if(points.Count != elements.Count)
+            {
+                TaskDialog.Show("Error", "Elements count not equal to points count.");
+                return null;
+            }
+
+            try
+            {
+                // Prep the elements
+                // Delete the parameter value
+                using (AdnRme.ProgressForm form = new AdnRme.ProgressForm("Clear parameter value.", "Processing {0} out of " + elements.Count.ToString() + " elements", elements.Count))
+                {
+                    RevitServices.Transactions.TransactionManager.Instance.EnsureInTransaction(DocumentManager.Instance.CurrentUIDocument.Document);
+
+                    foreach (var el in elements)
+                    {
+                        Element element = ((Proto.Element)el).InternalElement;
+                        if (element == null) continue;
+                        element.LookupParameter(parameter).Set("");
+                    }
+
+                    form.Increment();
+                    iteration++;
+
+                    RevitServices.Transactions.TransactionManager.Instance.TransactionTaskDone();
+                }
+                // Populate element parameters
+                using (AdnRme.ProgressForm form = new AdnRme.ProgressForm("Populating Room Data", "Processing {0} out of " + iterations.ToString() + " elements", iterations))
+                {
+                    iteration = 0;
+                    RevitServices.Transactions.TransactionManager.Instance.EnsureInTransaction(DocumentManager.Instance.CurrentUIDocument.Document);
+
+                    for (int i = 0; i < elements.Count; i++)
+                    {
+                        object pointCarry = null;
+
+                        Element el = ((Proto.Element)elements[i]).InternalElement;
+                        if (el == null) continue;
+                        Parameter param = el.LookupParameter(parameter);
+                        if (param == null)
+                        {
+                            continue;
+                        }
+                        for (int j = 0; j < rooms.Count; j++)
+                        {
+                            if (form.getAbortFlag())
+                            {
+                                return null;
+                                //return "Aborted by user";
+                            }
+
+                            Autodesk.Revit.DB.Architecture.Room r = ((Proto.Element)rooms[j]).InternalElement as Autodesk.Revit.DB.Architecture.Room;
+                            DS.Solid s = (DS.Solid)solids[j];
+                            if (r == null || s == null || points[i] == null) continue;
+                            object testPoint = AssignRoom(r, s, el, points[i], param);
+
+                            if (testPoint != null)
+                            {
+                                pointCarry = testPoint;
+                            }
+
+                            form.Increment();
+                            iteration++;
+
+                        }
+                        if (param.AsString().Equals(""))
+                        {
+                            param.Set("n/a");
+                        }
+                        if (pointCarry != null) success++;
+                        pts.Add(pointCarry);
+                    }
+
+                    RevitServices.Transactions.TransactionManager.Instance.TransactionTaskDone();
+                }
+            }
+            catch (Exception ex)
+            {
+                TaskDialog.Show("Error", ex.Message + ex.Data.ToString());
+            }
+            string message = String.Format("{0} out of {1} elements are contained within rooms and were successfully processed.", success.ToString(), elements.Count.ToString());
+            return new Dictionary<string, object>
+            {
+                { "points", pts },
+                { "message", message }
+            };
+        }
+
+        #endregion
     }
 
 
