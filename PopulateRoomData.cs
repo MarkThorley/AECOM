@@ -61,7 +61,7 @@ namespace DynamoAecom
                         double h = (v.Outline.Max.V - v.Outline.Min.V) * feet;
 
                         Parameter view_comment = v.get_Parameter(BuiltInParameter.VIEW_DESCRIPTION);
-                        
+
                         if ((w < wi / 2) && (h < he / 2))
                         {
                             view_comment.Set("A");
@@ -128,6 +128,7 @@ namespace DynamoAecom
                 {
                     string viewName = viewNames[i];
                     DS.Solid viewSolid = viewGeometries[i];
+                    List<DS.Point> sectionPoints = new List<DS.Point>();
 
                     // FOR EACH ELEMENT
                     for (int j = 0; j < numElements; j++)
@@ -165,14 +166,23 @@ namespace DynamoAecom
 
                         if (geometry.Count > 0)
                         {
-                            DS.Point point = GetPoint(geometry);
-                            if(point == null)
+                            try
                             {
-                                continue;
+                                DS.Point point = GetPoint(geometry);
+                                if (point == null)
+                                {
+                                    continue;
+                                }
+                                //point = CheckPoint(sectionPoints, point);
+                                //sectionPoints.Add(point);
+                                vNames.Add(viewSheets[i]);
+                                points.Add(point);
+                                eNames.Add(elementsText[j]);
                             }
-                            vNames.Add(viewSheets[i]);
-                            points.Add(point);
-                            eNames.Add(elementsText[j]);
+                            catch(Exception ex)
+                            {
+                                TaskDialog.Show("Error", ex.Message + ex.Data.ToString());
+                            }
                         }
                     }
                 }
@@ -187,6 +197,25 @@ namespace DynamoAecom
                     { "elements", eNames }
                 };
         }
+
+        private static DS.Point CheckPoint(List<DS.Point> sectionPoints, DS.Point point)
+        {
+            DS.Point result = null;
+
+            foreach(DS.Point p in sectionPoints)
+            {
+                if(p.X == point.X && p.Y == point.Y)
+                {
+                    result = CheckPoint(sectionPoints, DS.Point.ByCoordinates(point.X, point.Y + 2.0, point.Z));
+                }
+                else
+                {
+                    result = point;
+                }
+            }
+            return result;
+        }
+
         /// <summary>
         /// Retrieves the center point from a DS.Geometry
         /// </summary>
